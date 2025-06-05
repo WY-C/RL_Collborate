@@ -9,9 +9,11 @@ class GridEnv(gym.Env):
     def __init__(self, grid_size, render_mode = None, normalize_obs = False): #goal position 제거 확인하기
         super(GridEnv, self).__init__()
         self.grid_size = grid_size
-        #self.observation_space = gym.spaces.Discrete(8)
+        self.observation_space = gym.spaces.Discrete(5)
         self.action_space = gym.spaces.Discrete(4)  # Up, Down, Left, Right
         self.state = np.zeros(8)
+
+        self.return_state = np.zeros((2, 6))  # 각 에이전트의 상태를 저장할 배열
         self.reward = np.zeros(2)
         self.timestep = 1
         self.tot_reward = 0
@@ -27,12 +29,10 @@ class GridEnv(gym.Env):
         self.timestep = 1
         self.tot_reward = 0
         #timestep
-        
         self.state[0] = 0
         self.state[1] = 0
         self.state[2] = self.grid_size - 1
         self.state[3] = self.grid_size - 1
-
         goal = random.sample(range(1, self.grid_size*self.grid_size), 2)
         self.state[4], self.state[5] = goal[0] // self.grid_size, goal[0] % self.grid_size
         self.state[6], self.state[7] = goal[1] // self.grid_size, goal[1] % self.grid_size
@@ -40,7 +40,10 @@ class GridEnv(gym.Env):
         #self.state[2] = self.grid_size - 1
         #self.state[3] = self.grid_size - 1
         obs = self._normalize_obs(self.state)
-        return obs, {}
+        self.return_state[0] = obs[[0, 1, 4, 5, 6, 7]]
+        self.return_state[1] = obs[[2, 3, 4, 5, 6, 7]]
+        #state 수정완료오
+        return self.return_state, {}
     
     def _normalize_obs(self, state):
         return state / self.grid_size if self.normalize_obs else state.copy()
@@ -171,7 +174,10 @@ class GridEnv(gym.Env):
             terminated = True
             self.reward[0] = -1
             self.reward[1] = -1
-        return self.state.copy(), self.reward, terminated, False, {}
+
+        self.return_state[0] = self.state[[0, 1, 4, 5, 6, 7]]
+        self.return_state[1] = self.state[[2, 3, 4, 5, 6, 7]]
+        return self.return_state, self.reward, terminated, False, {}
     
     def get_timestep(self):
         return self.timestep
@@ -242,7 +248,7 @@ class GridEnvGUI:
         x2 = x1 + self.cell_size
         y2 = y1 + self.cell_size        
         self.canvas.create_rectangle(x1, y1, x2, y2, fill=color)
-        time.sleep(1)
+        #time.sleep(1)
 
     def render(self, agent_pos1, agent_pos2, goal_pos1, goal_pos2, timestep, tot_reward, color="blue"):
         self.canvas.delete("all")

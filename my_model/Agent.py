@@ -7,10 +7,10 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from torch.nn import functional as F
 import collections
-state_size = 8
+state_size = 6
 action_size = 4
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
+print(device)
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
         super(DQN, self).__init__()
@@ -85,7 +85,7 @@ class DQNAgent:
     
     model = DQN(state_size, action_size).to(device)
     target_model = DQN(state_size, action_size).to(device)
-    learning_rate = 0.0001
+    learning_rate = 0.00001
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
@@ -108,7 +108,7 @@ class DQNAgent:
         'target_model_state_dict': DQNAgent.target_model.state_dict(),
         'optimizer_state_dict': DQNAgent.optimizer.state_dict(),
         'epsilon': DQNAgent.epsilon_current,
-        'replay_buffer': DQNAgent.replay_buffer.buffer,
+        'replay_buffer': DQNAgent.replay_buffer,
         'replay_priority': DQNAgent.replay_buffer.priority,
 
         }, path)
@@ -119,7 +119,7 @@ class DQNAgent:
         DQNAgent.target_model.load_state_dict(checkpoint['target_model_state_dict'])
         DQNAgent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         DQNAgent.epsilon_current = checkpoint['epsilon_current']
-        DQNAgent.replay_buffer.buffer = checkpoint['replay_buffer']
+        DQNAgent.replay_buffer = checkpoint['replay_buffer']
         DQNAgent.replay_buffer.priority = checkpoint['replay_priority']
 
     def choose_action(self, state):
@@ -150,12 +150,12 @@ class DQNAgent:
         qs = self.model(states).gather(1, actions.view(-1, 1)).squeeze(1)
 
         with torch.no_grad():
-            #next_actions = self.model(next_states).argmax(dim=1)
-            #next_qs = self.target_model(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
+            next_actions = self.model(next_states).argmax(dim=1)
+            next_q_values = self.target_model(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
             
             
-            next_q_values = self.target_model(next_states)
-            next_q_values, _ = next_q_values.max(dim=1)
+            #next_q_values = self.target_model(next_states)
+            #next_q_values, _ = next_q_values.max(dim=1)
             target = rewards + (1 - dones) * self.gamma * next_q_values
 
         
@@ -200,7 +200,7 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-class ReplayAgent:
+class DQN_Replay:
     
     model = DQN(state_size, action_size).to(device)
     target_model = DQN(state_size, action_size).to(device)
@@ -212,7 +212,7 @@ class ReplayAgent:
     gamma = 0.99
     epsilon_start = 1.0
     epsilon_current = 1.0
-    epsilon_min = 0.05
+    epsilon_min = 0.01
     epsilon_decay_episode = 10000
 
     def __init__(self, state_size, action_size):
@@ -222,21 +222,21 @@ class ReplayAgent:
         
     def save_model(self, path):
         torch.save({
-        'model_state_dict': ReplayAgent.model.state_dict(),
-        'target_model_state_dict': ReplayAgent.target_model.state_dict(),
-        'replay_buffer': ReplayAgent.replay_buffer.buffer,
-        'optimizer_state_dict': ReplayAgent.optimizer.state_dict(),
-        'epsilon_current': ReplayAgent.epsilon_current,
+        'model_state_dict': DQN_Replay.model.state_dict(),
+        'target_model_state_dict': DQN_Replay.target_model.state_dict(),
+        'replay_buffer': DQN_Replay.replay_buffer,
+        'optimizer_state_dict': DQN_Replay.optimizer.state_dict(),
+        'epsilon_current': DQN_Replay.epsilon_current,
         }, path)
         
     def load_model(self, path):
         checkpoint = torch.load(path, weights_only=False)
-        ReplayAgent.model.load_state_dict(checkpoint['model_state_dict'])
-        ReplayAgent.target_model.load_state_dict(checkpoint['target_model_state_dict'])
-        ReplayAgent.replay_buffer.buffer = checkpoint['replay_buffer']
-        ReplayAgent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        ReplayAgent.epsilon_current = checkpoint['epsilon_current']
-        print(ReplayAgent.epsilon_current)
+        DQN_Replay.model.load_state_dict(checkpoint['model_state_dict'])
+        DQN_Replay.target_model.load_state_dict(checkpoint['target_model_state_dict'])
+        DQN_Replay.replay_buffer = checkpoint['replay_buffer']
+        DQN_Replay.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        DQN_Replay.epsilon_current = checkpoint['epsilon_current']
+        print(DQN_Replay.epsilon_current)
 
     def choose_action(self, state):
         if np.random.rand() <= self.epsilon_current:
@@ -265,10 +265,89 @@ class ReplayAgent:
         qs = self.model(states).gather(1, actions.view(-1, 1)).squeeze(1)
 
         with torch.no_grad():
-            #next_actions = self.model(next_states).argmax(dim=1)
-            #next_q_values= self.target_model(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
+            next_actions = self.model(next_states).argmax(dim=1)
+            next_q_values= self.target_model(next_states).gather(1, next_actions.view(-1, 1)).squeeze(1)
             #next_q_values = self.target_model(next_states).max(dim=1)[0]
 
+            #next_q_values = self.target_model(next_states)
+            # Follow greedy policy: use the one with the highest value
+            #next_q_values, _ = next_q_values.max(dim=1)
+            # Avoid potential broadcast issue
+            #next_q_values = next_q_values.reshape(-1, 1)
+            target = rewards + (1 - dones) * self.gamma * next_q_values
+
+        
+        #loss = self.criterion(qs, target) #F.smooth_l1_loss(qs, target)
+        loss = F.smooth_l1_loss(qs, target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+class DDQN_Replay:
+    
+    model = DQN(state_size, action_size).to(device)
+    target_model = DQN(state_size, action_size).to(device)
+    learning_rate = 0.0001
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.MSELoss()
+    replay_buffer = ReplayBuffer()
+
+    gamma = 0.99
+    epsilon_start = 1.0
+    epsilon_current = 1.0
+    epsilon_min = 0.01
+    epsilon_decay_episode = 10000
+
+    def __init__(self, state_size, action_size):
+        
+        self.state_size = state_size
+        self.action_size = action_size
+        
+    def save_model(self, path):
+        torch.save({
+        'model_state_dict': DDQN_Replay.model.state_dict(),
+        'target_model_state_dict': DDQN_Replay.target_model.state_dict(),
+        'replay_buffer': DDQN_Replay.replay_buffer,
+        'optimizer_state_dict': DDQN_Replay.optimizer.state_dict(),
+        'epsilon_current': DDQN_Replay.epsilon_current,
+        }, path)
+        
+    def load_model(self, path):
+        checkpoint = torch.load(path, weights_only=False)
+        DDQN_Replay.model.load_state_dict(checkpoint['model_state_dict'])
+        DDQN_Replay.target_model.load_state_dict(checkpoint['target_model_state_dict'])
+        DDQN_Replay.replay_buffer = checkpoint['replay_buffer']
+        DDQN_Replay.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        DDQN_Replay.epsilon_current = checkpoint['epsilon_current']
+        print(DDQN_Replay.epsilon_current)
+
+    def choose_action(self, state):
+        if np.random.rand() <= self.epsilon_current:
+            return np.random.choice(self.action_size)
+        
+        state = torch.FloatTensor(state).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            q_values = self.model(state)
+
+        return torch.argmax(q_values, dim=1).item()
+    
+    def update_target_model(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+
+    def update(self):
+        if len(self.replay_buffer) < 32:
+            return
+        
+        states, actions, rewards, next_states, dones = self.replay_buffer.get_batch()
+        states = states.to(device)
+        actions = actions.to(device)
+        rewards = rewards.to(device)
+        next_states = next_states.to(device)
+        dones = dones.to(device)
+        qs = self.model(states).gather(1, actions.view(-1, 1)).squeeze(1)
+
+        with torch.no_grad():
             next_q_values = self.target_model(next_states)
             # Follow greedy policy: use the one with the highest value
             next_q_values, _ = next_q_values.max(dim=1)
